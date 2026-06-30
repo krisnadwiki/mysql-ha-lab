@@ -1,0 +1,190 @@
+# =============================================================
+# mysql-ha-lab — Docker Compose
+# =============================================================
+# Milestone 1-5: Project Foundation → REST API
+#
+# Arsitektur:
+#   mysql1 (Primary) ─┐
+#   mysql2 (Secondary) ├─► InnoDB Cluster ─► MySQL Router ─► FastAPI
+#   mysql3 (Secondary) ┘
+#
+# Jalankan: docker compose up -d
+# =============================================================
+
+services:
+
+  # ─────────────────────────────────────────────────────────
+  # MILESTONE 2 — MySQL Cluster Nodes
+  # ─────────────────────────────────────────────────────────
+
+  mysql1:
+    image: mysql/mysql-server:8.0
+    container_name: mysql1
+    hostname: mysql1
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_HOST: "%"
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql1-data:/var/lib/mysql
+      - ./config/mysql/my1.cnf:/etc/my.cnf.d/ha.cnf:ro
+    networks:
+      mysql-ha-net:
+        aliases:
+          - mysql1
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost",
+             "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  mysql2:
+    image: mysql/mysql-server:8.0
+    container_name: mysql2
+    hostname: mysql2
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_HOST: "%"
+    ports:
+      - "3307:3306"
+    volumes:
+      - mysql2-data:/var/lib/mysql
+      - ./config/mysql/my2.cnf:/etc/my.cnf.d/ha.cnf:ro
+    networks:
+      mysql-ha-net:
+        aliases:
+          - mysql2
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost",
+             "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  mysql3:
+    image: mysql/mysql-server:8.0
+    container_name: mysql3
+    hostname: mysql3
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_ROOT_HOST: "%"
+    ports:
+      - "3308:3306"
+    volumes:
+      - mysql3-data:/var/lib/mysql
+      - ./config/mysql/my3.cnf:/etc/my.cnf.d/ha.cnf:ro
+    networks:
+      mysql-ha-net:
+        aliases:
+          - mysql3
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost",
+             "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+
+  # ─────────────────────────────────────────────────────────
+  # MILESTONE 4 — MySQL Router
+  # ─────────────────────────────────────────────────────────
+
+  mysql-router:
+    image: mysql/mysql-router:8.0
+    container_name: mysql-router
+    hostname: mysql-router
+    restart: unless-stopped
+    environment:
+      MYSQL_HOST: mysql1
+      MYSQL_PORT: 3306
+      MYSQL_USER: ${MYSQL_ADMIN_USER}
+      MYSQL_PASSWORD: ${MYSQL_ADMIN_PASSWORD}
+      MYSQL_INNODB_CLUSTER_MEMBERS: 3
+    ports:
+      - "${ROUTER_RW_PORT:-6446}:6446"   # Read/Write
+      - "${ROUTER_RO_PORT:-6447}:6447"   # Read Only
+    volumes:
+      - router-data:/var/lib/mysqlrouter
+    networks:
+      mysql-ha-net:
+        aliases:
+          - mysql-router
+    depends_on:
+      mysql1:
+        condition: service_healthy
+      mysql2:
+        condition: service_healthy
+      mysql3:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "mysqlrouter", "--version"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # ─────────────────────────────────────────────────────────
+  # MILESTONE 5 — REST API (FastAPI)
+  # ─────────────────────────────────────────────────────────
+
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: api
+    hostname: api
+    restart: unless-stopped
+    environment:
+      DB_HOST: ${DB_HOST:-mysql-router}
+      DB_RW_PORT: ${DB_RW_PORT:-6446}
+      DB_NAME: ${DB_NAME:-labdb}
+      DB_USER: ${DB_USER:-admin}
+      DB_PASSWORD: ${DB_PASSWORD:-adminpassword}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    networks:
+      mysql-ha-net:
+        aliases:
+          - api
+    depends_on:
+      mysql-router:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+# =============================================================
+# Networks
+# =============================================================
+
+networks:
+  mysql-ha-net:
+    name: mysql-ha-net
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+# =============================================================
+# Volumes
+# =============================================================
+
+volumes:
+  mysql1-data:
+    name: mysql1-data
+  mysql2-data:
+    name: mysql2-data
+  mysql3-data:
+    name: mysql3-data
+  router-data:
+    name: router-data

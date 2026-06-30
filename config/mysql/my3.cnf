@@ -1,0 +1,33 @@
+# =============================================================
+# MySQL Node 3 Configuration — mysql3
+# =============================================================
+
+[mysqld]
+# Identitas server
+server-id                   = 3
+report_host                 = mysql3
+
+# Binary Log (wajib untuk Group Replication)
+log_bin                     = mysql3-bin
+binlog_format               = ROW
+binlog_row_image            = FULL
+log_replica_updates         = ON
+sync_binlog                 = 1
+
+# GTID (wajib untuk InnoDB Cluster)
+gtid_mode                   = ON
+enforce_gtid_consistency    = ON
+
+# Group Replication plugin
+plugin_load_add             = group_replication.so
+group_replication_start_on_boot = OFF
+group_replication_bootstrap_group = OFF
+
+# InnoDB
+innodb_flush_log_at_trx_commit = 1
+default_authentication_plugin   = mysql_native_password
+
+# Performa & logging
+slow_query_log              = 1
+slow_query_log_file         = /var/log/mysql/mysql3-slow.log
+long_query_time             = 2

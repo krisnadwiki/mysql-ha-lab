@@ -1,0 +1,19 @@
+# =============================================================
+# REST API — Python Dependencies
+# =============================================================
+
+# Web Framework
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+
+# Database ORM
+sqlalchemy==2.0.30
+
+# MySQL Connector (digunakan SQLAlchemy sebagai driver)
+mysql-connector-python==8.4.0
+
+# Pydantic (untuk schema validation)
+pydantic==2.7.3
+
+# Environment variable loader
+python-dotenv==1.0.1
