@@ -25,43 +25,80 @@ Repository ini adalah **Proof of Concept** implementasi MySQL High Availability 
 ---
 
 ## 🏗️ Arsitektur
-
 ```mermaid
-graph TB
-    subgraph Client["👤 Client"]
-        SW[Swagger UI<br/>:8000/docs]
-        CURL[curl / HTTP Client]
-    end
+flowchart TB
 
-    subgraph Docker["🐳 Docker Network: mysql-ha-net"]
-        subgraph APILayer["REST API Layer"]
-            FASTAPI[🚀 FastAPI<br/>api:8000]
-        end
+%% ==========================
+%% CLIENT
+%% ==========================
+subgraph CLIENT["👤 Client"]
+    SW["🌐 Swagger UI<br/>localhost:8000/docs"]
+    CURL["💻 curl / HTTP Client"]
+end
 
-        subgraph RouterLayer["MySQL Router Layer"]
-            MR[⚡ MySQL Router]
-            RW["Port 6446<br/>Read/Write → PRIMARY"]
-            RO["Port 6447<br/>Read Only → SECONDARY"]
-        end
+%% ==========================
+%% DOCKER NETWORK
+%% ==========================
+subgraph DOCKER["🐳 Docker Network : mysql-ha-net"]
 
-        subgraph ClusterLayer["🗄️ InnoDB Cluster (Group Replication)"]
-            M1["mysql1<br/>PRIMARY 👑<br/>:3306"]
-            M2["mysql2<br/>SECONDARY<br/>:3307"]
-            M3["mysql3<br/>SECONDARY<br/>:3308"]
-        end
-    end
+%% API
+subgraph API["🚀 REST API"]
+    FASTAPI["FastAPI<br/>api:8000"]
+end
 
-    SW --> FASTAPI
-    CURL --> FASTAPI
-    FASTAPI -->|"All traffic"| RW
-    MR --> RW
-    MR --> RO
-    RW --> M1
-    RO --> M2
-    RO --> M3
-    M1 <-->|"Group Replication"| M2
-    M2 <-->|"Group Replication"| M3
-    M1 <-->|"Group Replication"| M3
+%% Router
+subgraph ROUTER["⚡ MySQL Router"]
+    MYSQLROUTER["MySQL Router"]
+
+    RW["6446<br/>Read / Write"]
+
+    RO["6447<br/>Read Only"]
+end
+
+%% Cluster
+subgraph CLUSTER["🗄️ MySQL InnoDB Cluster"]
+
+    PRIMARY["👑 mysql1<br/>PRIMARY"]
+
+    SECONDARY1["mysql2<br/>SECONDARY"]
+
+    SECONDARY2["mysql3<br/>SECONDARY"]
+
+end
+
+end
+
+%% ==========================
+%% Client Flow
+%% ==========================
+SW --> FASTAPI
+CURL --> FASTAPI
+
+%% ==========================
+%% API
+%% ==========================
+FASTAPI --> MYSQLROUTER
+
+%% ==========================
+%% Router
+%% ==========================
+MYSQLROUTER --> RW
+MYSQLROUTER --> RO
+
+%% ==========================
+%% Database
+%% ==========================
+RW --> PRIMARY
+
+RO --> SECONDARY1
+RO --> SECONDARY2
+
+%% ==========================
+%% Group Replication
+%% ==========================
+PRIMARY <-. Group Replication .-> SECONDARY1
+PRIMARY <-. Group Replication .-> SECONDARY2
+SECONDARY1 <-. Group Replication .-> SECONDARY2
 ```
 
 ---
