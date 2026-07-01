@@ -2,10 +2,12 @@
 
 > Lab pembelajaran **MySQL High Availability** menggunakan **MySQL InnoDB Cluster** dan **MySQL Router** berbasis Docker Compose.
 
+![GitHub License](https://img.shields.io/github/license/krisnadwiki/mysql-ha-lab)
 [![MySQL](https://img.shields.io/badge/MySQL-8.0-blue?logo=mysql)](https://www.mysql.com/)
 [![Docker](https://img.shields.io/badge/Docker-Compose-2496ED?logo=docker)](https://docs.docker.com/compose/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688?logo=fastapi)](https://fastapi.tiangolo.com/)
 [![Python](https://img.shields.io/badge/Python-3.11-yellow?logo=python)](https://www.python.org/)
+![Status](https://img.shields.io/badge/Status-Active-success)
 
 ---
 
@@ -111,7 +113,8 @@ Pastikan tools berikut sudah terinstall sebelum memulai:
 |---|---|---|
 | Docker | >= 24.0 | Container runtime |
 | Docker Compose | >= 2.20 | Orkestrasi container |
-| MySQL Shell | >= 8.0 | Administrasi InnoDB Cluster |
+| MySQL Shell | >= 8.0 (Linux/macOS) | Administrasi InnoDB Cluster (untuk script .sh) |
+| PowerShell | 5.1+ (Windows) | Menjalankan setup-cluster-windows.ps1 |
 | curl / Postman | Any | Testing API (opsional) |
 
 ### Cek instalasi
@@ -119,6 +122,14 @@ Pastikan tools berikut sudah terinstall sebelum memulai:
 docker --version
 docker compose version
 mysqlsh --version
+```
+
+Untuk Windows, `mysqlsh` di host bersifat opsional jika menggunakan script:
+
+```powershell
+$PSVersionTable.PSVersion
+docker --version
+docker compose version
 ```
 
 ---
@@ -129,6 +140,7 @@ mysqlsh --version
 mysql-ha-lab/
 ├── 📄 MILESTONE.md              # Development milestones
 ├── 📄 README.md                 # Dokumentasi utama (file ini)
+├── 📄 LICENSE                   # Lisensi MIT
 ├── 📄 .env.example              # Template environment variables
 ├── 📄 .gitignore
 ├── 📄 docker-compose.yml        # Orkestrasi semua service
@@ -140,10 +152,11 @@ mysql-ha-lab/
 │       └── my3.cnf              # Konfigurasi MySQL node 3
 │
 ├── 📁 scripts/
-│   ├── 01-configure-instances.sh  # dba.configureInstance()
-│   ├── 02-create-cluster.sh       # createCluster() + addInstance()
-│   ├── 03-bootstrap-router.sh     # Bootstrap MySQL Router
-│   └── 04-verify-cluster.sh       # Verifikasi status cluster
+│   ├── 01-configure-instances.sh   # dba.configureInstance() (Linux/macOS)
+│   ├── 02-create-cluster.sh        # createCluster() + addInstance() (Linux/macOS)
+│   ├── 03-bootstrap-router.sh      # Bootstrap MySQL Router (Linux/macOS)
+│   ├── 04-verify-cluster.sh        # Verifikasi status cluster
+│   └── setup-cluster-windows.ps1   # Setup cluster + bootstrap router (Windows)
 │
 ├── 📁 api/
 │   ├── Dockerfile
@@ -174,7 +187,7 @@ mysql-ha-lab/
 ### Step 1 — Clone dan Setup Environment
 
 ```bash
-git clone https://github.com/yourusername/mysql-ha-lab.git
+git clone https://github.com/krisnadwiki/mysql-ha-lab
 cd mysql-ha-lab
 
 # Salin template environment
@@ -184,26 +197,44 @@ cp .env.example .env
 # nano .env   atau   notepad .env
 ```
 
-### Step 2 — Jalankan Semua Container
+Untuk Windows PowerShell:
+
+```powershell
+git clone https://github.com/krisnadwiki/mysql-ha-lab
+cd mysql-ha-lab
+
+Copy-Item .env.example .env
+notepad .env
+```
+
+### Step 2 — Jalankan MySQL Nodes Dulu
 
 ```bash
-docker compose up -d
+docker compose up -d mysql1 mysql2 mysql3
 
-# Tunggu semua container healthy (bisa 1-2 menit)
+# Tunggu 3 node MySQL healthy (bisa 1-2 menit)
 docker compose ps
 ```
 
-**Expected output:**
+**Expected output minimal:**
 ```
 NAME           STATUS
 mysql1         Up X seconds (healthy)
 mysql2         Up X seconds (healthy)
 mysql3         Up X seconds (healthy)
-mysql-router   Up X seconds (healthy)
-api            Up X seconds (healthy)
 ```
 
 ### Step 3 — Konfigurasi InnoDB Cluster
+
+#### Opsi A (Windows)
+
+```powershell
+.\scripts\setup-cluster-windows.ps1
+```
+
+Script ini akan menjalankan konfigurasi instance, membuat InnoDB Cluster, restart `mysql-router`, lalu restart `api`.
+
+#### Opsi B (Linux/macOS)
 
 ```bash
 # Step 3a: Configure semua instance
@@ -217,14 +248,27 @@ chmod +x scripts/*.sh
 ./scripts/04-verify-cluster.sh
 ```
 
-### Step 4 — Verifikasi
+### Step 4 — Verifikasi Akhir
 
 ```bash
+# Cek status semua service
+docker compose ps
+
 # Cek API health
 curl http://localhost:8000/health
 
 # Buka Swagger UI
-# http://localhost:8000/docs
+http://localhost:8000/docs
+```
+
+**Expected output final:**
+```
+NAME           STATUS
+mysql1         Up X seconds (healthy)
+mysql2         Up X seconds (healthy)
+mysql3         Up X seconds (healthy)
+mysql-router   Up X seconds (healthy)
+api            Up X seconds (healthy)
 ```
 
 ---
@@ -351,7 +395,12 @@ docker compose down -v
 - Gunakan dedicated network untuk Group Replication traffic
 
 ---
-
 ## 📄 License
+This project is licensed under MIT License - see the [LICENSE](LICENSE) file for details.
 
-MIT License — bebas digunakan untuk pembelajaran dan POC.
+---
+
+<div align="center">
+  Built with ❤️ by Krisna Dwiki Aldi <br>
+  Copyright © 2026. All rights reserved.
+</div>

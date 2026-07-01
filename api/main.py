@@ -72,7 +72,7 @@ FastAPI → MySQL Router (port 6446 RW) → InnoDB Cluster
     version="1.0.0",
     contact={
         "name": "mysql-ha-lab",
-        "url": "https://github.com/yourusername/mysql-ha-lab",
+        "url": "https://github.com/krisnadwiki/mysql-ha-lab",
     },
     license_info={
         "name": "MIT",
