@@ -20,7 +20,7 @@ enforce_gtid_consistency    = ON
 
 # Group Replication plugin
 plugin_load_add             = group_replication.so
-group_replication_start_on_boot = OFF
+group_replication_start_on_boot = ON
 group_replication_bootstrap_group = OFF
 
 # InnoDB

@@ -28,10 +28,10 @@ Get-Content $envFile | Where-Object { $_ -match "^\s*[^#].+=." } | ForEach-Objec
     $envVars[$parts[0].Trim()] = $parts[1].Trim()
 }
 
-$ROOT_PASS  = $envVars["MYSQL_ROOT_PASSWORD"]
+$ROOT_PASS = $envVars["MYSQL_ROOT_PASSWORD"]
 $ADMIN_USER = $envVars["MYSQL_ADMIN_USER"]
 $ADMIN_PASS = $envVars["MYSQL_ADMIN_PASSWORD"]
-$CLUSTER    = if ($envVars["CLUSTER_NAME"]) { $envVars["CLUSTER_NAME"] } else { "myCluster" }
+$CLUSTER = if ($envVars["CLUSTER_NAME"]) { $envVars["CLUSTER_NAME"] } else { "myCluster" }
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Cyan
@@ -50,7 +50,8 @@ foreach ($c in $containers) {
     if ($status -ne "healthy") {
         Write-Host "  [WARN] $c status: $status - tunggu..." -ForegroundColor DarkYellow
         Start-Sleep -Seconds 15
-    } else {
+    }
+    else {
         Write-Host "  [OK] $c healthy" -ForegroundColor Green
     }
 }
@@ -60,31 +61,35 @@ Write-Host ""
 Write-Host ">>> Step 2: Configure setiap instance (dba.configureInstance)..." -ForegroundColor Yellow
 Write-Host "    (Ini membuat user admin dan konfigurasi Group Replication)" -ForegroundColor Gray
 
-$configScript = "
+$configScriptTemplate = @'
 import time
 
-nodes = [('mysql1', 3306), ('mysql2', 3306), ('mysql3', 3306)]
+print('  Configuring {0}:3306...')
+try:
+    dba.configure_instance('root:{1}@localhost:3306', {{
+        'clusterAdmin': '{2}',
+        'clusterAdminPassword': '{3}',
+        'restart': True,
+        'interactive': False
+    }})
+    print('  OK: {0} configured.')
+except Exception as e:
+    message = str(e).lower()
+    if 'already belonging to an innodb cluster' in message:
+        print('  SKIP: {0} already belongs to a cluster.')
+    else:
+        raise
 
-for host, port in nodes:
-    print(f'  Configuring {host}:{port}...')
-    try:
-        dba.configure_instance(f'root:${ROOT_PASS}@{host}:{port}', {
-            'clusterAdmin': '${ADMIN_USER}',
-            'clusterAdminPassword': '${ADMIN_PASS}',
-            'restart': True,
-            'interactive': False
-        })
-        print(f'  OK: {host} configured.')
-    except Exception as e:
-        print(f'  INFO: {host} - {e}')
-    time.sleep(3)
 print('Done.')
-"
+'@
 
-docker exec mysql1 mysqlsh --no-wizard --uri "root:${ROOT_PASS}@mysql1:3306" --py --execute $configScript
-Write-Host ""
-Write-Host "  Menunggu semua node restart (30 detik)..." -ForegroundColor Gray
-Start-Sleep -Seconds 30
+foreach ($node in @('mysql1', 'mysql2', 'mysql3')) {
+    $configScript = $configScriptTemplate -f $node, $ROOT_PASS, $ADMIN_USER, $ADMIN_PASS
+    docker exec $node mysqlsh --no-wizard --uri "root:${ROOT_PASS}@localhost:3306" --py --execute $configScript
+    Write-Host ""
+    Write-Host "  Menunggu $node restart (20 detik)..." -ForegroundColor Gray
+    Start-Sleep -Seconds 20
+}
 
 # ── STEP 3: Buat InnoDB Cluster ──────────────────────────────
 Write-Host ""
@@ -93,30 +98,51 @@ Write-Host ">>> Step 3: Membuat InnoDB Cluster..." -ForegroundColor Yellow
 $clusterScript = "
 import time, json
 
-print('Membuat cluster dari mysql1...')
-cluster = dba.create_cluster('${CLUSTER}', {
-    'multiPrimary': False,
-    'force': False,
-    'interactive': False
-})
-print('OK: Cluster dibuat.')
-time.sleep(5)
+try:
+    print('Membuat cluster dari mysql1...')
+    cluster = dba.create_cluster('${CLUSTER}', {
+        'multiPrimary': False,
+        'force': False,
+        'interactive': False
+    })
+    print('OK: Cluster dibuat.')
+    time.sleep(5)
+except Exception as e:
+    if 'already belongs to an innodb cluster' in str(e).lower():
+        print('Cluster sudah ada, memakai cluster yang sudah terbentuk.')
+        cluster = dba.get_cluster('${CLUSTER}')
+    else:
+        raise
 
 print('Menambahkan mysql2...')
-cluster.add_instance('${ADMIN_USER}:${ADMIN_PASS}@mysql2:3306', {
-    'recoveryMethod': 'clone',
-    'interactive': False,
-    'waitRecovery': 3
-})
-print('OK: mysql2 bergabung.')
+try:
+    cluster.add_instance('${ADMIN_USER}:${ADMIN_PASS}@mysql2:3306', {
+        'recoveryMethod': 'clone',
+        'interactive': False,
+        'waitRecovery': 3
+    })
+    print('OK: mysql2 bergabung.')
+except Exception as e:
+    message = str(e).lower()
+    if 'already belongs to the cluster' in message or 'already part of this innodb cluster' in message:
+        print('SKIP: mysql2 sudah menjadi member cluster.')
+    else:
+        raise
 
 print('Menambahkan mysql3...')
-cluster.add_instance('${ADMIN_USER}:${ADMIN_PASS}@mysql3:3306', {
-    'recoveryMethod': 'clone',
-    'interactive': False,
-    'waitRecovery': 3
-})
-print('OK: mysql3 bergabung.')
+try:
+    cluster.add_instance('${ADMIN_USER}:${ADMIN_PASS}@mysql3:3306', {
+        'recoveryMethod': 'clone',
+        'interactive': False,
+        'waitRecovery': 3
+    })
+    print('OK: mysql3 bergabung.')
+except Exception as e:
+    message = str(e).lower()
+    if 'already belongs to the cluster' in message or 'already part of this innodb cluster' in message:
+        print('SKIP: mysql3 sudah menjadi member cluster.')
+    else:
+        raise
 
 print('')
 print('=== Status Cluster ===')
@@ -132,25 +158,41 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "  InnoDB Cluster berhasil dibentuk!" -ForegroundColor Green
 
-# ── STEP 4: Restart mysql-router ─────────────────────────────
+# ── STEP 4: Bootstrap database aplikasi ─────────────────────
 Write-Host ""
-Write-Host ">>> Step 4: Restart mysql-router agar bootstrap ke cluster..." -ForegroundColor Yellow
-docker compose restart mysql-router
+Write-Host ">>> Step 4: Bootstrap database aplikasi (labdb)..." -ForegroundColor Yellow
+
+$schemaScript = @"
+print('Membuat database labdb dan privilege untuk admin...')
+session.run_sql('CREATE DATABASE IF NOT EXISTS labdb')
+session.run_sql("GRANT ALL PRIVILEGES ON labdb.* TO '$ADMIN_USER'@'%'")
+session.run_sql('FLUSH PRIVILEGES')
+print('OK: database labdb siap digunakan.')
+"@
+
+docker exec mysql1 mysqlsh --no-wizard --uri "root:${ROOT_PASS}@mysql1:3306" --py --execute $schemaScript
+Write-Host "  OK: database labdb siap digunakan." -ForegroundColor Green
+
+# ── STEP 5: Restart mysql-router ─────────────────────────────
+Write-Host ""
+Write-Host ">>> Step 5: Jalankan mysql-router agar bootstrap ke cluster..." -ForegroundColor Yellow
+docker compose up -d mysql-router
 Write-Host "  Menunggu router bootstrap (30 detik)..." -ForegroundColor Gray
 Start-Sleep -Seconds 30
 
 $routerStatus = docker inspect --format='{{.State.Health.Status}}' mysql-router 2>&1
 if ($routerStatus -eq "healthy") {
     Write-Host "  mysql-router healthy!" -ForegroundColor Green
-} else {
+}
+else {
     Write-Host "  [WARN] Router status: $routerStatus" -ForegroundColor DarkYellow
     Write-Host "  Cek log: docker logs mysql-router" -ForegroundColor Gray
 }
 
-# ── STEP 5: Restart api ──────────────────────────────────────
+# ── STEP 6: Restart api ──────────────────────────────────────
 Write-Host ""
-Write-Host ">>> Step 5: Restart API..." -ForegroundColor Yellow
-docker compose restart api
+Write-Host ">>> Step 6: Jalankan API..." -ForegroundColor Yellow
+docker compose up -d api
 Start-Sleep -Seconds 15
 
 # ── HASIL AKHIR ──────────────────────────────────────────────

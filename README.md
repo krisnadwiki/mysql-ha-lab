@@ -223,6 +223,12 @@ mysql1         Up X seconds (healthy)
 mysql2         Up X seconds (healthy)
 mysql3         Up X seconds (healthy)
 ```
+<div class="warning" style="background-color: #fff3cd; border-left: 6px solid #ffc107; padding: 15px; color: #664d03;">
+  <strong>⚠️ WARNING:</strong>
+  <br>Jangan menjalankan Router maupun API terlebih dahulu.
+  <br>Karena InnoDB Cluster belum terbentuk.
+</div>
+
 
 ### Step 3 — Konfigurasi InnoDB Cluster
 
@@ -232,7 +238,20 @@ mysql3         Up X seconds (healthy)
 .\scripts\setup-cluster-windows.ps1
 ```
 
-Script ini akan menjalankan konfigurasi instance, membuat InnoDB Cluster, restart `mysql-router`, lalu restart `api`.
+Script ini akan menjalankan konfigurasi instance, membuat InnoDB Cluster, membuat database aplikasi `labdb` lewat `mysqlsh` root ke `mysql1`, lalu menjalankan `mysql-router` dan `api`.
+
+#### Alur Windows yang dipakai script
+
+Saat menjalankan `setup-cluster-windows.ps1`, urutannya adalah:
+
+1. Start dan cek health `mysql1`, `mysql2`, `mysql3`
+2. Configure tiap instance MySQL
+3. Bentuk InnoDB Cluster
+4. Bootstrap database aplikasi `labdb` dan privilege `admin`
+5. Jalankan `mysql-router`
+6. Jalankan `api`
+
+Kalau Anda rerun script ini di environment yang sudah pernah dipakai, script akan mencoba memakai cluster yang sudah ada dan melewati member yang sudah tergabung.
 
 #### Opsi B (Linux/macOS)
 
@@ -248,14 +267,47 @@ chmod +x scripts/*.sh
 ./scripts/04-verify-cluster.sh
 ```
 
-### Step 4 — Verifikasi Akhir
+### Step 4 — Jalankan Router
+Jalankan Router
+```bash
+docker compose up -d mysql-router
+```
+
+**Expected output:**
+```
+[+] up 4/4
+ ✔ Container mysql3       Healthy                                                      
+ ✔ Container mysql1       Healthy                                                      
+ ✔ Container mysql2       Healthy                                                      
+ ✔ Container mysql-router Started   
+ ```
+
+### Step 5 — Jalankan REST API
+
+Baru setelah Router healthy.
+```bash
+docker compose up -d api
+```
+
+Jika Anda memakai Windows workflow otomatis, langkah ini sudah dilakukan oleh `setup-cluster-windows.ps1`.
+
+**Expected output:**
+```
+[+] up 5/5
+ ✔ Container mysql1       Healthy                                                      
+ ✔ Container mysql3       Healthy                                                      
+ ✔ Container mysql2       Healthy                                                      
+ ✔ Container mysql-router Healthy                                                      
+ ✔ Container api          Started  
+ ```
+### Step 6 — Verifikasi Akhir
 
 ```bash
 # Cek status semua service
 docker compose ps
 
 # Cek API health
-curl http://localhost:8000/health
+curl.exe http://localhost:8000/health
 
 # Buka Swagger UI
 http://localhost:8000/docs
@@ -370,6 +422,10 @@ docker compose down
 # Reset total (HAPUS SEMUA DATA)
 docker compose down -v
 ```
+
+### Catatan Windows
+
+Di PowerShell, gunakan `curl.exe` jika ingin memanggil endpoint HTTP dari command line. Alias `curl` bawaan PowerShell mengarah ke `Invoke-WebRequest`.
 
 ---
 

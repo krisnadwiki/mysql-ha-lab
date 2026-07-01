@@ -312,12 +312,209 @@ docker network inspect mysql-ha-net
 
 Gunakan perintah ini untuk diagnosa cepat:
 
-```bash
-echo "=== Container Status ===" && docker compose ps
+```powershell
+echo "=== Container Status ===" ; docker compose ps
 echo ""
-echo "=== Container Logs (last 20 lines) ===" && docker compose logs --tail=20
+echo "=== Router Logs (last 10 lines) ===" ; docker logs mysql-router --tail 10
 echo ""
-echo "=== Network ===" && docker network inspect mysql-ha-net --format='{{range .Containers}}{{.Name}} {{end}}'
+echo "=== Cluster Status ==="
+docker exec mysql1 mysqlsh --no-wizard --uri "admin:adminpassword@mysql1:3306" `
+  --py --execute "import json; c=dba.get_cluster(); print(json.dumps(c.status(), indent=2, default=str))" 2>&1
 echo ""
-echo "=== Volumes ===" && docker volume ls | grep mysql
+echo "=== Network ===" ; docker network inspect mysql-ha-net --format="{{range .Containers}}{{.Name}} {{end}}"
+echo ""
+echo "=== Volumes ===" ; docker volume ls | Select-String mysql
+```
+
+---
+
+## 8. Metadata Already Exists
+
+### Gejala
+
+```
+Unable to create cluster. Metadata schema already exists.
+```
+
+Error ini muncul saat `setup-cluster-windows.ps1` (atau `02-create-cluster.sh`) dijalankan
+pada instance yang pernah membuat cluster sebelumnya.
+
+### Penyebab
+
+Script setup dijalankan lebih dari sekali tanpa menghapus volume terlebih dahulu.
+Metadata cluster (`mysql_innodb_cluster_metadata`) masih tersimpan di volume MySQL.
+
+### Solusi
+
+**Opsi 1 (Direkomendasikan):** Gunakan `setup-cluster-windows.ps1` versi terbaru.
+
+Script ini secara otomatis mendeteksi metadata yang ada dan melakukan `dba.get_cluster()`
+alih-alih `dba.create_cluster()`. Tidak perlu intervensi manual.
+
+```powershell
+.\scripts\setup-cluster-windows.ps1
+```
+
+**Opsi 2:** Jika cluster masih aktif, cukup ambil referensinya:
+
+```powershell
+docker exec mysql1 mysqlsh --no-wizard `
+  --uri "admin:adminpassword@mysql1:3306" `
+  --py --execute "import json; c=dba.get_cluster(); print(json.dumps(c.status(), indent=2, default=str))"
+```
+
+**Opsi 3:** Jika ingin reset total, hapus semua volume:
+
+```powershell
+docker compose down -v
+# Kemudian lakukan First Time Setup dari awal
+```
+
+> ⚠️ Opsi 3 akan menghapus semua data MySQL.
+
+---
+
+## 9. Group Replication OFFLINE
+
+### Gejala
+
+```
+dba.get_cluster() gagal — Group Replication tidak aktif
+performance_schema.replication_group_members menunjukkan OFFLINE
+```
+
+### Penyebab
+
+Semua node MySQL restart bersamaan (misalnya karena komputer direboot).
+Dalam kondisi ini, Group Replication tidak bisa otomatis resume karena
+tidak ada node yang menjadi "seed" untuk cluster.
+
+### Recovery
+
+**Opsi 1 (Otomatis):** Jalankan script setup — script akan mendeteksi GR OFFLINE
+dan memanggil `rebootClusterFromCompleteOutage()` secara otomatis:
+
+```powershell
+.\scripts\setup-cluster-windows.ps1
+```
+
+**Opsi 2 (Manual):** Reboot cluster secara manual via MySQL Shell:
+
+```powershell
+docker exec mysql1 mysqlsh --no-wizard `
+  --uri "admin:adminpassword@mysql1:3306" `
+  --py --execute "dba.reboot_cluster_from_complete_outage('myCluster', {'interactive': False})"
+```
+
+**Opsi 3:** Jika reboot gagal (misalnya data divergen), lakukan reset total:
+
+```powershell
+docker compose down -v
+# Kemudian First Time Setup dari awal
+```
+
+### Cara Verifikasi
+
+```powershell
+docker exec mysql1 mysql -uadmin -padminpassword `
+  -e "SELECT MEMBER_HOST, MEMBER_STATE FROM performance_schema.replication_group_members;"
+# Semua node harus ONLINE
+```
+
+---
+
+## 10. Router: Waiting for Cluster Instances
+
+### Gejala
+
+Log `mysql-router` menampilkan:
+```
+[Entrypoint] Successfully contacted mysql server at mysql1:3306. Checking for cluster state.
+[Entrypoint] ERROR: Can not connect to database. Exiting.
+```
+
+Container `mysql-router` status `unhealthy` atau `exited`.
+
+### Penyebab
+
+MySQL Router mencoba bootstrap sebelum InnoDB Cluster terbentuk.
+Router membutuhkan metadata cluster (`mysql_innodb_cluster_metadata`) untuk dapat berjalan.
+Jika `setup-cluster-windows.ps1` belum dijalankan, metadata belum ada.
+
+### Solusi
+
+```powershell
+# 1. Pastikan cluster sudah terbentuk dahulu
+.\scripts\setup-cluster-windows.ps1
+
+# 2. Atau verifikasi cluster manual, lalu restart router
+docker exec mysql1 mysqlsh --no-wizard `
+  --uri "admin:adminpassword@mysql1:3306" `
+  --py --execute "print(dba.get_cluster().status()['defaultReplicaSet']['statusText'])"
+
+# Jika cluster ONLINE, restart router
+docker compose restart mysql-router
+```
+
+### Cara Verifikasi
+
+```powershell
+# Cek log router
+docker logs mysql-router --tail 20
+
+# Probe port 6446
+.\scripts\wait-for-router.ps1 -TimeoutSec 30
+```
+
+---
+
+## 11. API: Cannot Connect mysql-router:6446
+
+### Gejala
+
+- `GET /health` mengembalikan `500 Internal Server Error`
+- Log API: `ProgrammingError: 1049 (42000): Unknown database 'labdb'`
+- Log API: `OperationalError: Can't connect to MySQL server on 'mysql-router'`
+
+### Penyebab Umum
+
+| Penyebab | Indikator |
+|---|---|
+| Database `labdb` belum dibuat | Error `Unknown database 'labdb'` |
+| Router belum healthy | `docker compose ps` menunjukkan router `unhealthy` |
+| Cluster belum ada | Router log: `Can not connect to database` |
+| Credentials salah | Error `Access denied` |
+
+### Solusi
+
+**Jika error `Unknown database 'labdb'`:**
+
+```powershell
+# Buat database manual
+docker exec mysql1 mysql -uroot -prootpassword `
+  -e "CREATE DATABASE IF NOT EXISTS labdb; GRANT ALL PRIVILEGES ON labdb.* TO 'admin'@'%'; FLUSH PRIVILEGES;"
+
+# Restart API
+docker compose restart api
+```
+
+**Jika router belum healthy:**
+
+```powershell
+# Jalankan setup script (idempotent, aman dijalankan ulang)
+.\scripts\setup-cluster-windows.ps1
+```
+
+**Verifikasi environment API:**
+
+```powershell
+docker exec api env | Select-String "DB_"
+# Harus menampilkan: DB_HOST=mysql-router, DB_RW_PORT=6446, DB_NAME=labdb
+```
+
+### Cara Verifikasi
+
+```powershell
+curl http://localhost:8000/health
+# Expected: {"status": "ok", "database": {"status": "connected"}}
 ```

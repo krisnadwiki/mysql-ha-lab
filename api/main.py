@@ -15,7 +15,6 @@ import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import text
 
 from database import engine, Base
 from routers import patients
@@ -29,14 +28,7 @@ async def lifespan(app: FastAPI):
     - Startup: Buat tabel jika belum ada, buat database jika belum ada
     - Shutdown: Cleanup (tidak ada yang perlu dibersihkan)
     """
-    # Buat database jika belum ada
     db_name = os.getenv("DB_NAME", "labdb")
-    with engine.connect() as conn:
-        conn.execute(text(f"CREATE DATABASE IF NOT EXISTS `{db_name}`"))
-        conn.execute(text(f"USE `{db_name}`"))
-        conn.commit()
-
-    # Buat semua tabel dari model
     Base.metadata.create_all(bind=engine)
     print(f"✓ Database '{db_name}' dan tabel berhasil diinisialisasi.")
 

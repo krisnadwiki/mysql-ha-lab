@@ -55,8 +55,7 @@ print('  → Menjalankan dba.configureInstance() pada ${HOST}...')
 dba.configure_instance('root:${ROOT_PASS}@${HOST}:${PORT}', {
     'clusterAdmin': '${ADMIN_USER}',
     'clusterAdminPassword': '${ADMIN_PASS}',
-    'restart': True,
-    'interactive': False
+    'restart': True
 })
 
 print('  ✓ ${HOST} berhasil dikonfigurasi.')
