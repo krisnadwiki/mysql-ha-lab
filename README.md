@@ -183,8 +183,8 @@ mysql-ha-lab/
 ---
 
 ## 💻 Application
-![alt text](swagger.png)
-![alt text](node-db.png)
+![alt text](img/swagger.png)
+![alt text](img/node-db.png)
 
 ---
 ## 🚀 Quick Start
