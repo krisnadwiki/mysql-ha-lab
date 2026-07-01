@@ -182,6 +182,11 @@ mysql-ha-lab/
 
 ---
 
+## 💻 Application
+![alt text](swagger.png)
+![alt text](node-db.png)
+
+---
 ## 🚀 Quick Start
 
 ### Step 1 — Clone dan Setup Environment
